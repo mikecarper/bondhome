@@ -8,7 +8,7 @@ bond_devices_file="${HOME}/.bond/devices"
 
 # option --output/-o requires 1 argument
 LONGOPTS=help
-OPTIONS=hhrR:f:i:t:I:d:a:
+OPTIONS=hhrRf:i:t:I:d:a:
 
 # -regarding ! and PIPESTATUS see above
 # -temporarily store output to be able to check for errors
@@ -33,12 +33,11 @@ rescan=0
 rescanNetwork=0
 mkdir -p "${HOME}/.bond/"
 touch "${bond_db_file}"
-touch "${bond_devices_file}"
 
 helpoutput() {
 cat<<EOF
  -f     json file used to read/write global info. Default is ${bond_db_file}
- -l     json file for device list. Default is ${bond_devices_file}
+ -l     json file prefix for device list. Default is ${bond_devices_file}
  -r     rescan for devices.
  -R     rescan network for bond home base station devices.
  -i     bond id to use
@@ -159,6 +158,7 @@ BondSelect () {
         selected_bondid=$( jq -r '.selected_bondid // empty' < "$bond_db_file" )
         if [[ -n "${selected_bondid}" && "${rescanNetwork}" -eq 0 ]]
         then
+            echo "Using ${selected_bondid}"
             return
         fi
     fi
@@ -192,6 +192,25 @@ BondSelect () {
             else
                 bond_bridges_confirmed=$( echo -e "${bond_bridges_confirmed}\n${ip_address}\t${bond_id_from_url}" )
             fi
+            file_size=$(stat -c "%s" "${bond_db_file}")
+            if [[ "${file_size}" -lt 3 ]]
+            then
+                echo "adding bond: ${bond_id_from_url} ${ip_address}"
+                jq -n --arg keyvar "${bond_id_from_url}" --arg ip "${ip_address}" '.bonds[($keyvar)] = {
+                "ip": ($ip),
+                "port": 80
+                }' > "${bond_db_file}"
+            else
+                bond_exists=$( jq -r ".bonds.${bond_id_from_url}.ip // empty" < "$bond_db_file" )
+                if [[ -z "${bond_exists}" ]]
+                then
+                    echo "adding bond: ${bond_id_from_url} ${ip_address}"
+                    jq --arg keyvar "${bond_id_from_url}" --arg ip "${ip_address}" '.bonds[($keyvar)] = {
+                    "ip": ($ip),
+                    "port": 80
+                    }' "${bond_db_file}" > "${bond_db_file}.tmp" && mv "${bond_db_file}.tmp" "${bond_db_file}"
+                fi
+            fi
         fi
     done <<< "${bond_bridges}"
     if [[ -z "${bond_bridges_confirmed}" ]]
@@ -202,7 +221,8 @@ BondSelect () {
     wordcount=$( echo "${bond_bridges_confirmed}" | wc -l )
     if [[ $wordcount -eq 1 ]]
     then
-        selected_bondid=$bond_id_from_url
+        selected_bondid=$( echo "${bond_bridges_confirmed}" | awk '{print $2}' )
+        ip_address=$( echo "${bond_bridges_confirmed}" | awk '{print $1}' )
     elif [[ $wordcount -gt 1 ]]
     then
         # Read the lines into an array
@@ -223,6 +243,18 @@ BondSelect () {
         done
     fi
 
+    if [[ -n "${selected_bondid}" ]]
+    then
+        selected_bondid_test=$( jq -r '.selected_bondid // empty' < "$bond_db_file" )
+        if [[ -z "${selected_bondid_test}" ]]
+        then
+            jq --arg var "${selected_bondid}" '{
+            "selected_bondid": ($var),
+            }' "${bond_db_file}" > "${bond_db_file}.tmp" && mv "${bond_db_file}.tmp" "${bond_db_file}"
+        else
+            jq --arg var "${selected_bondid}" '. + { "selected_bondid": ($var) }' "${bond_db_file}" > "${bond_db_file}.tmp" && mv "${bond_db_file}.tmp" "${bond_db_file}"
+        fi
+    fi
 }
 
 BondTokenGet() {
@@ -232,10 +264,12 @@ BondTokenGet() {
         bond_token=$( jq -r ".bonds.${selected_bondid}.token // empty" < "$bond_db_file" )
         if [[ -n "${bond_token}" ]]
         then
-            BondTokenTest
-            if [[ -z "${tokenworks}" ]]
+            tokenworked=$( BondTokenTest )
+            if [[ -n "${tokenworked}" ]]
             then
                 return
+            else
+                bond_token=''
             fi
         fi
     fi
@@ -258,6 +292,11 @@ BondTokenGet() {
         fi
     done
 
+    if [[ -n "${bond_token}" ]]
+    then
+        jq --arg keyvar "${selected_bondid}" --arg token "${bond_token}" '.bonds[($keyvar)].token |= $token' "${bond_db_file}" > "${bond_db_file}.tmp" && mv "${bond_db_file}.tmp" "${bond_db_file}"
+    fi
+
     # Screen Shot
     #if [[ -z "$( command -v tesseract )" ]]
     #then
@@ -276,7 +315,8 @@ BondTokenGet() {
 BondTokenTest() {
     BondGetIPFromFile
 
-    tokenworks=$( curl -s --max-time 5 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/sys/time" | jq -r '.uniz_time //empty' )
+    tokenworks=$( curl -s --max-time 5 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/sys/time" | jq -r '.unix_time //empty' )
+    echo "${tokenworks}"
 }
 
 BondGetDevices() {
