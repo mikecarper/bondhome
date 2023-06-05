@@ -8,7 +8,7 @@ bond_devices_file="${HOME}/.bond/devices"
 
 # option --output/-o requires 1 argument
 LONGOPTS=help
-OPTIONS=hhrRf:i:t:I:d:a:
+OPTIONS=hhrRFf:i:t:I:d:a:
 
 # -regarding ! and PIPESTATUS see above
 # -temporarily store output to be able to check for errors
@@ -31,6 +31,7 @@ action=''
 updateRan=0
 rescan=0
 rescanNetwork=0
+tryagain=1
 mkdir -p "${HOME}/.bond/"
 touch "${bond_db_file}"
 
@@ -45,6 +46,7 @@ cat<<EOF
  -I     bond IP to use
  -d     bond device to use
  -a     bond action to take
+ -F     fail if call did not work
  -h -H  (--help) display this help file
 EOF
 }
@@ -109,6 +111,11 @@ while true; do
             action="${2}"
             shift 2
         ;;
+        -F)
+            echo "Option -F do not try curl again"
+            tryagain=0
+            shift
+        ;;
         -h|-H|--help)
             helpoutput
             shift
@@ -150,19 +157,8 @@ BondGetIPFromFile () {
     fi
 }
 
-
-BondSelect () {
-    if [[ -r "${bond_db_file}" ]]
-    then
-        echo "Reading .bond/db.json file"
-        selected_bondid=$( jq -r '.selected_bondid // empty' < "$bond_db_file" )
-        if [[ -n "${selected_bondid}" && "${rescanNetwork}" -eq 0 ]]
-        then
-            echo "Using ${selected_bondid}"
-            return
-        fi
-    fi
-
+BondSearchNetwork() {
+    desired_bond_id=${1}
     if [[ -z "$( command -v avahi-browse )" ]]
     then
         if [[ "${updateRan}" -eq 0 ]]
@@ -209,6 +205,10 @@ BondSelect () {
                     "ip": ($ip),
                     "port": 80
                     }' "${bond_db_file}" > "${bond_db_file}.tmp" && mv "${bond_db_file}.tmp" "${bond_db_file}"
+                elif [[ "${bond_exists}" != "${ip_address}" ]]
+                then
+                    echo "updating bond ip: ${bond_id_from_url} ${ip_address}"
+                    jq --arg new_ip "${ip_address}" '.bonds[].ip |= $new_ip' "${bond_db_file}" > "${bond_db_file}.tmp" && mv "${bond_db_file}.tmp" "${bond_db_file}"
                 fi
             fi
         fi
@@ -218,29 +218,37 @@ BondSelect () {
         return
     fi
 
-    wordcount=$( echo "${bond_bridges_confirmed}" | wc -l )
-    if [[ $wordcount -eq 1 ]]
+    if [[ -n "${desired_bond_id}" && "${bond_bridges_confirmed}" == *"${desired_bond_id}"* ]]
     then
-        selected_bondid=$( echo "${bond_bridges_confirmed}" | awk '{print $2}' )
-        ip_address=$( echo "${bond_bridges_confirmed}" | awk '{print $1}' )
-    elif [[ $wordcount -gt 1 ]]
-    then
-        # Read the lines into an array
-        IFS=$'\n' read -d '' -r -a lines_array <<< "${bond_bridges_confirmed}"
+        selected_bondid=$( echo "${bond_bridges_confirmed}" | grep "${desired_bond_id}" | awk '{print $2}' )
+        ip_address=$( echo "${bond_bridges_confirmed}" | grep "${desired_bond_id}" | awk '{print $1}' )
+        echo "Found bond ${selected_bondid} at ${ip_address}"
 
-        # Prompt the user to select a line from the menu
-        PS3="Select The Default Bond Device: "
-        select option in "${lines_array[@]}"
-        do
-            if [[ -n $option ]]; then
-                echo "${option} has been selected."
-                selected_bondid=$( echo "${option}" | awk '{print $2}' )
-                ip_address=$( echo "${option}" | awk '{print $1}' )
-                break
-            else
-                echo "Invalid option. Please try again."
-            fi
-        done
+    else
+        wordcount=$( echo "${bond_bridges_confirmed}" | wc -l )
+        if [[ $wordcount -eq 1 ]]
+        then
+            selected_bondid=$( echo "${bond_bridges_confirmed}" | awk '{print $2}' )
+            ip_address=$( echo "${bond_bridges_confirmed}" | awk '{print $1}' )
+        elif [[ $wordcount -gt 1 ]]
+        then
+            # Read the lines into an array
+            IFS=$'\n' read -d '' -r -a lines_array <<< "${bond_bridges_confirmed}"
+
+            # Prompt the user to select a line from the menu
+            PS3="Select The Default Bond Device: "
+            select option in "${lines_array[@]}"
+            do
+                if [[ -n $option ]]; then
+                    echo "${option} has been selected."
+                    selected_bondid=$( echo "${option}" | awk '{print $2}' )
+                    ip_address=$( echo "${option}" | awk '{print $1}' )
+                    break
+                else
+                    echo "Invalid option. Please try again."
+                fi
+            done
+        fi
     fi
 
     if [[ -n "${selected_bondid}" ]]
@@ -257,8 +265,23 @@ BondSelect () {
     fi
 }
 
-BondTokenGet() {
-    # JSON
+
+BondSelect () {
+    if [[ -r "${bond_db_file}" ]]
+    then
+        echo "Reading .bond/db.json file"
+        selected_bondid=$( jq -r '.selected_bondid // empty' < "$bond_db_file" )
+        if [[ -n "${selected_bondid}" ]]
+        then
+            echo "Using ${selected_bondid}"
+            return
+        fi
+    fi
+
+    BondSearchNetwork
+}
+
+BondTokenGetFromJSON() {
     if [[ -r "$bond_db_file" ]]
     then
         bond_token=$( jq -r ".bonds.${selected_bondid}.token // empty" < "$bond_db_file" )
@@ -273,6 +296,30 @@ BondTokenGet() {
             fi
         fi
     fi
+}
+
+BondTokenGet() {
+    # Read from json file.
+    BondTokenGetFromJSON
+    if [[ -n "${bond_token}" ]]
+    then
+        return
+    fi
+
+    BondGetIPFromFile
+    bond_id_from_url=$( curl -s --max-time 5 "http://${ip_address}/v2/sys/version" | grep -e "^\[" -e "^{"  | jq -r '.bondid' )
+    if [[ -z "${bond_id_from_url}" ]]
+    then
+        BondSearchNetwork "${selected_bondid}"
+    fi
+
+    # Read from json file.
+    BondTokenGetFromJSON
+    if [[ -n "${bond_token}" ]]
+    then
+        return
+    fi
+
 
     # User Input
     echo "Open Bond App on your phone"
@@ -424,7 +471,14 @@ BondDoAction() {
 
     echo
     echo "PUT http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}"
-    curl -o /dev/null -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}"
+    http_code=$( curl -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" )
+    echo "${http_code}"
+    if [[ "${http_code}" != "200" && "${tryagain}" -eq 1 ]]
+    then
+        echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -d ${selectedBondDevice} -a ${action} -F -R"
+        ${scriptName} "-i" "${selected_bondid}" "-t" "${bond_token}" "-d" "${selectedBondDevice}" "-a" "${action}" "-F" "-R"
+        exit
+    fi
 }
 
 if [[ -z "${selected_bondid}" ]]
@@ -438,6 +492,11 @@ then
         exit 1
     fi
     echo "Using bond bridge ${selected_bondid}"
+fi
+
+if [[ "${rescanNetwork}" -eq 1 ]]
+then
+    BondSearchNetwork "${selected_bondid}"
 fi
 
 if [[ -z "${bond_token}" ]]
