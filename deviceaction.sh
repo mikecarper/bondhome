@@ -172,7 +172,8 @@ BondSearchNetwork() {
     fi
 
     echo "Searching network for bond bridges"
-    bond_bridges=$( avahi-browse -a -p -t --resolve  2> /dev/null | grep bond | awk -F ';' '{print $8 " " $4}' | grep -v '^[[:space:]]' )
+    bond_bridges=$( timeout 10s avahi-browse -a -p -t --resolve  2> /dev/null | grep bond | awk -F ';' '{print $8 " " $4}' | grep -v '^[[:space:]]' )
+    echo "Parsing data"
 
     while read -r line
     do
@@ -211,8 +212,10 @@ BondSearchNetwork() {
                     jq --arg new_ip "${ip_address}" '.bonds[].ip |= $new_ip' "${bond_db_file}" > "${bond_db_file}.tmp" && mv "${bond_db_file}.tmp" "${bond_db_file}"
                 fi
             fi
+            #cat "${bond_db_file}"
         fi
     done <<< "${bond_bridges}"
+
     if [[ -z "${bond_bridges_confirmed}" ]]
     then
         return
@@ -256,18 +259,17 @@ BondSearchNetwork() {
         selected_bondid_test=$( jq -r '.selected_bondid // empty' < "$bond_db_file" )
         if [[ -z "${selected_bondid_test}" ]]
         then
-            jq --arg var "${selected_bondid}" '{
-            "selected_bondid": ($var),
-            }' "${bond_db_file}" > "${bond_db_file}.tmp" && mv "${bond_db_file}.tmp" "${bond_db_file}"
+            jq --arg var "${selected_bondid}" '.selected_bondid = ($var)' "${bond_db_file}" > "${bond_db_file}.tmp" && mv "${bond_db_file}.tmp" "${bond_db_file}"
         else
             jq --arg var "${selected_bondid}" '. + { "selected_bondid": ($var) }' "${bond_db_file}" > "${bond_db_file}.tmp" && mv "${bond_db_file}.tmp" "${bond_db_file}"
         fi
+        #cat "${bond_db_file}"
     fi
 }
 
 
 BondSelect () {
-    if [[ -r "${bond_db_file}" ]]
+    if [[ -r "${bond_db_file}" && -s "${bond_db_file}" ]]
     then
         echo "Reading .bond/db.json file"
         selected_bondid=$( jq -r '.selected_bondid // empty' < "$bond_db_file" )
@@ -445,10 +447,12 @@ BondSelectAction() {
     fi
     selectedBondDeviceDetails=$( echo "${selectedBondDeviceDetails}" | jq --argjson state "${state}" '.state += $state' )
 
+    echo ""
     echo "Current state:"
     echo "${selectedBondDeviceDetails}" | jq -r '.state | to_entries[] | "  \(.key): \(.value)"'  | grep -vE '^ +\_'
+    echo ""
 
-    PS3="Available actions: "
+    PS3="Select Action: "
     # Create an array of menu options
     IFS=$'\n' read -rd '' -a actions <<< "$( echo "${selectedBondDeviceDetails}" | jq -r '.actions | to_entries[] | "\(.value)"' | grep -v '^_' )"
 
@@ -471,7 +475,7 @@ BondDoAction() {
 
     echo
     echo "PUT http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}"
-    http_code=$( curl -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" )
+    http_code=$( curl -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" | tail -1 )
     echo "${http_code}"
     if [[ "${http_code}" != "200" && "${tryagain}" -eq 1 ]]
     then
