@@ -5,10 +5,11 @@
 scriptName=${0}
 bond_db_file="${HOME}/.bond/db.json"
 bond_devices_file="${HOME}/.bond/devices"
+bond_groups_file="${HOME}/.bond/groups"
 
 # option --output/-o requires 1 argument
 LONGOPTS=help
-OPTIONS=hhrRFf:i:t:I:d:a:
+OPTIONS=hhrRFf:i:t:I:d:a:m:g:
 
 # -regarding ! and PIPESTATUS see above
 # -temporarily store output to be able to check for errors
@@ -26,12 +27,16 @@ eval set -- "$PARSED"
 selected_bondid=''
 bond_token=''
 ip_address=''
-selectedBondDevice=''
 action=''
 updateRan=0
 rescan=0
 rescanNetwork=0
 tryagain=1
+
+menu=0
+selectedBondDevice=''
+bondGroupsFinal=''
+
 mkdir -p "${HOME}/.bond/"
 touch "${bond_db_file}"
 
@@ -39,12 +44,15 @@ helpoutput() {
 cat<<EOF
  -f     json file used to read/write global info. Default is ${bond_db_file}
  -l     json file prefix for device list. Default is ${bond_devices_file}
- -r     rescan for devices.
+ -L     json file prefix for group list. Default is ${bond_groups_file}
+ -r     rescan for devices & groups.
  -R     rescan network for bond home base station devices.
+ -m     1 for devices 2 for groups
  -i     bond id to use
  -t     bond token to use
  -I     bond IP to use
  -d     bond device to use
+ -g     bond group to use
  -a     bond action to take
  -F     fail if call did not work
  -h -H  (--help) display this help file
@@ -76,8 +84,19 @@ while true; do
                 exit 4
             fi
         ;;
+        -L)
+            if [[ -r "${2}" ]]
+            then
+                bond_groups_file="${2}"
+                echo "Using file ${bond_groups_file}"
+                shift 2
+            else
+                echo "File is not readable: ${2}"
+                exit 4
+            fi
+        ;;
         -r)
-            echo "Option -r rescan for devices"
+            echo "Option -r rescan for devices & groups"
             rescan=1
             shift
         ;;
@@ -85,6 +104,11 @@ while true; do
             echo "Option -R rescan network for bond home base station devices"
             rescanNetwork=1
             shift
+        ;;
+        -m)
+            echo "Option -m Set menu passed with argument: $2"
+            menu="${2}"
+            shift 2
         ;;
         -i)
             echo "Option -i Set Bond ID passed with argument: $2"
@@ -104,6 +128,11 @@ while true; do
         -d)
             echo "Option -d Set device passed with argument: $2"
             selectedBondDevice="${2}"
+            shift 2
+        ;;
+        -g)
+            echo "Option -g Set group passed with argument: $2"
+            selectedBondGroup="${2}"
             shift 2
         ;;
         -a)
@@ -146,6 +175,40 @@ then
     sudo apt install jq -y
     echo
 fi
+
+# Menu function
+function display_menu() {
+    echo "Menu:"
+    echo "1. Devices"
+    echo "2. Groups"
+}
+
+Menu() {
+    if [[ "${menu}" -ne 0 ]]
+    then
+        return
+    fi
+
+    # Devices or Groups
+    while true; do
+        display_menu
+        read -r -p "Enter your choice: " choice
+        case $choice in
+            1)
+                menu=1
+                break
+                ;;
+            2)
+                menu=2
+                break
+                ;;
+            *)
+                echo "Invalid choice. Please try again."
+                ;;
+        esac
+        echo
+    done
+}
 
 BondGetIPFromFile () {
     if [[ -z "${ip_address}" ]]
@@ -368,6 +431,137 @@ BondTokenTest() {
     echo "${tokenworks}"
 }
 
+BondGetGroups() {
+    if [[ -r "${bond_groups_file}-${selected_bondid}.json" ]]
+    then
+        bondGroupsFinal=$( cat "${bond_groups_file}-${selected_bondid}.json")
+    fi
+    if [[ -n "${bondGroupsFinal}" && "${rescan}" -eq 0 ]]
+    then
+
+        return
+    fi
+
+    BondGetIPFromFile
+    echo "Getting groups under bond ${selected_bondid} at ${ip_address}"
+
+    bondGroups=$( curl -H "BOND-Token: ${bond_token}" -s "http://${ip_address}/v2/groups"  )
+    bondGroupsFinal=$bondGroups
+    while read -r line1
+    do
+        echo -n "$line1"
+
+        group=$( curl -s --max-time 5 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${line1}" )
+        if [[ -z "${group}" ]]
+        then
+            group=$( curl -s --max-time 5 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${line1}" )
+        fi
+        #echo -n " getting state"
+        #state=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${line1}/state" )
+        #if [[ -z "${state}" ]]
+        #then
+        #    state=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${line1}/state" )
+        #fi
+
+        combined=${group}
+        #combined=$( echo "${group}" | jq --argjson state "${state}" '.state += $state' )
+        bondGroupsFinal=$( echo "${bondGroupsFinal}" | jq --arg keyvar "${line1}" --argjson combined "${combined}" '.[($keyvar)] += $combined' )
+        echo -ne "\r\033[K"
+    done <<< "$( echo "${bondGroups}" | jq -r 'keys_unsorted[]' | grep -v '_' )"
+
+    # Store groups in a json file.
+    echo "${bondGroupsFinal}" > "${bond_groups_file}-${selected_bondid}.json"
+}
+
+BondSelectGroup() {
+
+    # Read the menu selection
+    PS3="Enter your choice: "
+
+    # Create an array of menu options
+    IFS=$'\n' read -rd '' -a options <<< "$( echo "${bondGroupsFinal}" | jq -r 'to_entries[] | select(.value.locations? and .value.name?) | "\(.value.locations | join(", ")) - \(.value.name) - \(.key)"' | sort )"
+
+    # Display the menu options
+    select selectedGroup in "${options[@]}"
+    do
+        if [[ -z $selectedGroup ]]
+        then
+            echo "Invalid option ${selectedGroup}"
+        else
+            break
+        fi
+
+    done
+    selectedBondGroup=$( echo "${selectedGroup}" | awk '{print $NF}')
+}
+
+BondSelectGroupAction() {
+    BondGetIPFromFile
+
+    echo "${selectedBondGroup} selected"
+
+    selectedBondGroupDetails=$( echo "${bondGroupsFinal}" | jq --arg keyvar "${selectedBondGroup}" '.[($keyvar)]' )
+
+    state=$( curl -s --max-time 5 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${selectedBondGroup}/state" )
+    if [[ -z "${state}" ]]
+    then
+        state=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${selectedBondGroup}/state" )
+    fi
+    selectedBondGroupDetails=$( echo "${selectedBondGroupDetails}" | jq --argjson state "${state}" '.state += $state' )
+
+    echo ""
+    echo "Current state:"
+    echo "${selectedBondGroupDetails}" | jq -r '.state | to_entries[] | "  \(.key): \(.value)"'  | grep -vE '^ +\_'
+    echo ""
+
+    PS3="Select Action: "
+    # Create an array of menu options
+    IFS=$'\n' read -rd '' -a actions <<< "$( echo "${selectedBondGroupDetails}" | jq -r '.actions | to_entries[] | "\(.value)"' | grep -v '^_' )"
+
+    # Display the menu options
+    select action in "${actions[@]}"
+    do
+        if [[ -z $action ]]
+        then
+            echo "Invalid option"
+        else
+            break
+        fi
+
+    done
+
+}
+
+BondDoGroupAction() {
+    BondGetIPFromFile
+
+    echo
+    echo "PUT http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}"
+    http_code=$( curl -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}" | tail -1 )
+    echo "${http_code}"
+    if [[ "${http_code}" != "200" && "${tryagain}" -eq 1 ]]
+    then
+        echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -d ${selectedBondGroup} -a ${action} -F -R"
+        ${scriptName} "-i" "${selected_bondid}" "-t" "${bond_token}" "-d" "${selectedBondGroup}" "-a" "${action}" "-F" "-R"
+        exit
+    fi
+}
+
+BondDoDeviceAction() {
+    BondGetIPFromFile
+
+    echo
+    echo "PUT http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}"
+    http_code=$( curl -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}" | tail -1 )
+    echo "${http_code}"
+    if [[ "${http_code}" != "200" && "${tryagain}" -eq 1 ]]
+    then
+        echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -d ${selectedBondGroup} -a ${action} -F -R"
+        ${scriptName} "-i" "${selected_bondid}" "-t" "${bond_token}" "-d" "${selectedBondGroup}" "-a" "${action}" "-F" "-R"
+        exit
+    fi
+}
+
 BondGetDevices() {
     if [[ -r "${bond_devices_file}-${selected_bondid}.json" ]]
     then
@@ -378,8 +572,9 @@ BondGetDevices() {
         return
     fi
 
-    echo "Getting devices under bond ${selected_bondid} at ${ip_address}"
     BondGetIPFromFile
+    echo "Getting devices under bond ${selected_bondid} at ${ip_address}"
+
 
     bondDevices=$( curl -H "BOND-Token: ${bond_token}" -s "http://${ip_address}/v2/devices"  )
     bondDevicesFinal=$bondDevices
@@ -433,10 +628,10 @@ BondSelectDevice() {
     selectedBondDevice=$( echo "${selectedDevice}" | awk '{print $NF}')
 }
 
-BondSelectAction() {
+BondSelectDeviceAction() {
     BondGetIPFromFile
 
-    echo "You selected ${selectedBondDevice}"
+    echo "${selectedBondDevice} selected"
 
     selectedBondDeviceDetails=$( echo "${bondDevicesFinal}" | jq --arg keyvar "${selectedBondDevice}" '.[($keyvar)]' )
 
@@ -470,7 +665,7 @@ BondSelectAction() {
 
 }
 
-BondDoAction() {
+BondDoDeviceAction() {
     BondGetIPFromFile
 
     echo
@@ -514,32 +709,63 @@ then
     echo "Using bond token ${bond_token}"
 fi
 
-BondGetDevices
 
-if [[ -z "${selectedBondDevice}" ]]
+Menu
+if [[ "${menu}" -eq 1 ]]
 then
-    BondSelectDevice
+    BondGetDevices
     if [[ -z "${selectedBondDevice}" ]]
     then
-        echo "Bond device not found"
-        exit 2
+        BondSelectDevice
+        if [[ -z "${selectedBondDevice}" ]]
+        then
+            echo "Bond device not found"
+            exit 2
+        fi
     fi
-    echo "Using bond device ${selectedBondDevice}"
-fi
 
-if [[ -z "${action}" ]]
-then
-    BondSelectAction
     if [[ -z "${action}" ]]
     then
-        echo "Action to do not found"
-        exit 2
+        BondSelectDeviceAction
+        if [[ -z "${action}" ]]
+        then
+            echo "Action to do not found"
+            exit 2
+        fi
+        echo "Action: ${action}"
     fi
-    echo "Action: ${action}"
+    BondDoDeviceAction
+
+    echo
+    echo "command to do this again"
+    echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -I ${ip_address} -m 1 -d ${selectedBondDevice} -a ${action}"
 fi
+if [[ "${menu}" -eq 2 ]]
+then
+    BondGetGroups
+    if [[ -z "${selectedBondGroup}" ]]
+    then
+        BondSelectGroup "${bondGroupsFinal}"
+        if [[ -z "${selectedBondGroup}" ]]
+        then
+            echo "Bond group not found"
+            exit 2
+        fi
+    fi
 
-BondDoAction
+    if [[ -z "${action}" ]]
+    then
+        BondSelectGroupAction
+        if [[ -z "${action}" ]]
+        then
+            echo "Action to do not found"
+            exit 2
+        fi
+        echo "Action: ${action}"
+    fi
+    BondDoGroupAction
 
-echo
-echo "command to do this again"
-echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -I ${ip_address} -d ${selectedBondDevice} -a ${action}"
+    echo
+    echo "command to do this again"
+    echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -I ${ip_address} -m 2 -g ${selectedBondGroup} -a ${action}"
+fi
