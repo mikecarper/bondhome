@@ -9,7 +9,7 @@ bond_groups_file="${HOME}/.bond/groups"
 
 # option --output/-o requires 1 argument
 LONGOPTS=help
-OPTIONS=hhrRFf:i:t:I:d:a:m:g:
+OPTIONS=hhrRcFf:i:t:I:d:a:m:g:
 
 # -regarding ! and PIPESTATUS see above
 # -temporarily store output to be able to check for errors
@@ -31,6 +31,7 @@ action=''
 updateRan=0
 rescan=0
 rescanNetwork=0
+cronrun=0
 tryagain=1
 
 menu=0
@@ -47,6 +48,7 @@ cat<<EOF
  -L     json file prefix for group list. Default is ${bond_groups_file}
  -r     rescan for devices & groups.
  -R     rescan network for bond home base station devices.
+ -c     rescan all base stations for devices & groups and exit. Useful for cron jobs.
  -m     1 for devices 2 for groups
  -i     bond id to use
  -t     bond token to use
@@ -103,6 +105,11 @@ while true; do
         -R)
             echo "Option -R rescan network for bond home base station devices"
             rescanNetwork=1
+            shift
+        ;;
+        -c)
+            echo "Option -c rescan all base stations for devices & groups and exit"
+            cronrun=1
             shift
         ;;
         -m)
@@ -443,9 +450,14 @@ BondGetGroups() {
     fi
 
     BondGetIPFromFile
-    echo "Getting groups under bond ${selected_bondid} at ${ip_address}"
+    echo "Getting groups  under bond ${selected_bondid} at ${ip_address}"
 
-    bondGroups=$( curl -H "BOND-Token: ${bond_token}" -s "http://${ip_address}/v2/groups"  )
+    bondGroups=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" -s "http://${ip_address}/v2/groups"  )
+    if [[ -z "${bondGroups}" || $( echo "${bondGroups}" | jq -e 2>&1 | grep 'parse error' | wc -l) -eq 1 ]]
+    then
+        echo "No groups found here http://${ip_address}/v2/groups"
+        return
+    fi
     bondGroupsFinal=$bondGroups
     while read -r line1
     do
@@ -456,15 +468,26 @@ BondGetGroups() {
         then
             group=$( curl -s --max-time 5 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${line1}" )
         fi
-        #echo -n " getting state"
-        #state=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${line1}/state" )
-        #if [[ -z "${state}" ]]
-        #then
-        #    state=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${line1}/state" )
-        #fi
+        echo -n " getting schedules"
+        skeds=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${line1}/skeds" )
+        if [[ -z "${skeds}" ]]
+        then
+            skeds=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${line1}/skeds" )
+        fi
+
+        skeds_final="${skeds}"
+        while read -r sked
+        do
+            schedule=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${line1}/skeds/${sked}" )
+            if [[ -z "${schedule}" ]]
+            then
+                schedule=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/groups/${line1}/skeds${sked}" )
+            fi
+            skeds_final=$( jq --argjson schedule "${schedule}" --arg key "${sked}"  '.[($key)] += { "schedule": $schedule }' <<< "$skeds_final" )
+        done <<< "$( echo "${skeds}" | jq -r 'keys_unsorted[]' | grep -v '_' )"
 
         combined=${group}
-        #combined=$( echo "${group}" | jq --argjson state "${state}" '.state += $state' )
+        combined=$( echo "${group}" | jq --argjson skeds "${skeds}" '.skeds += $skeds' )
         bondGroupsFinal=$( echo "${bondGroupsFinal}" | jq --arg keyvar "${line1}" --argjson combined "${combined}" '.[($keyvar)] += $combined' )
         echo -ne "\r\033[K"
     done <<< "$( echo "${bondGroups}" | jq -r 'keys_unsorted[]' | grep -v '_' )"
@@ -576,7 +599,12 @@ BondGetDevices() {
     echo "Getting devices under bond ${selected_bondid} at ${ip_address}"
 
 
-    bondDevices=$( curl -H "BOND-Token: ${bond_token}" -s "http://${ip_address}/v2/devices"  )
+    bondDevices=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" -s "http://${ip_address}/v2/devices"  )
+    if [[ -z "${bondDevices}" || $( echo "${bondDevices}" | jq -e 2>&1 | grep 'parse error' | wc -l) -eq 1 ]]
+    then
+        echo "No devices found here http://${ip_address}/v2/devices"
+        return
+    fi
     bondDevicesFinal=$bondDevices
     while read -r line1
     do
@@ -587,15 +615,27 @@ BondGetDevices() {
         then
             device=$( curl -s --max-time 5 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/devices/${line1}" )
         fi
-        #echo -n " getting state"
-        #state=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/devices/${line1}/state" )
-        #if [[ -z "${state}" ]]
-        #then
-        #    state=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/devices/${line1}/state" )
-        #fi
+        echo -n " getting schedules"
+        skeds=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/devices/${line1}/skeds" )
+        if [[ -z "${skeds}" ]]
+        then
+            skeds=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/devices/${line1}/skeds" )
+        fi
+
+        skeds_final="${skeds}"
+        while read -r sked
+        do
+            schedule=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/devices/${line1}/skeds/${sked}" )
+            if [[ -z "${schedule}" ]]
+            then
+                schedule=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/devices/${line1}/skeds${sked}" )
+            fi
+            skeds_final=$( jq --argjson schedule "${schedule}" --arg key "${sked}"  '.[($key)] += { "schedule": $schedule }' <<< "$skeds_final" )
+        done <<< "$( echo "${skeds}" | jq -r 'keys_unsorted[]' | grep -v '_' )"
+
 
         combined=${device}
-        #combined=$( echo "${device}" | jq --argjson state "${state}" '.state += $state' )
+        combined=$( echo "${device}" | jq --argjson skeds "${skeds_final}" '.skeds += $skeds' )
         bondDevicesFinal=$( echo "${bondDevicesFinal}" | jq --arg keyvar "${line1}" --argjson combined "${combined}" '.[($keyvar)] += $combined' )
         echo -ne "\r\033[K"
     done <<< "$( echo "${bondDevices}" | jq -r 'keys_unsorted[]' | grep -v '_' )"
@@ -679,6 +719,38 @@ BondDoDeviceAction() {
         exit
     fi
 }
+
+
+###
+### Start of program
+###
+
+
+if [[ "${cronrun}" -eq 1 ]]
+then
+    rescan=1
+    BondSelect
+    if [[ -z "${selected_bondid}" ]]
+    then
+        exit 1
+    fi
+    BondSearchNetwork "${selected_bondid}"
+
+    while read -r line
+    do
+        selected_bondid=$( echo "${line}" | awk '{print $1}' )
+        ip_address=$( echo "${line}" | awk '{print $2}' )
+        bond_token=$( echo "${line}" | awk '{print $3}' )
+        echo
+        BondGetDevices
+        echo
+        BondGetGroups
+        echo
+    done <<< "$( jq -r '.bonds | to_entries[] | select(.value.ip? and .value.token?) | "\(.key) \(.value.ip) \(.value.token)"' < "$bond_db_file" )"
+
+    exit
+fi
+
 
 if [[ -z "${selected_bondid}" ]]
 then
