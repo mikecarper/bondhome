@@ -7,12 +7,14 @@ updateRan=0
 bond_token=''
 ip_address=''
 
-if find "${current_weather_txt}" -mmin -20 >/dev/null 2>&1
+if [[ -s "${current_weather_txt}" ]]
 then
-    cat "${current_weather_txt}"
-    exit
+    if [[ $( find "${current_weather_txt}" -mmin -20 | wc -l ) -eq 1 ]]
+    then
+        cat "${current_weather_txt}"
+        exit
+    fi
 fi
-
 
 # Make sure we have jq installed.
 if [[ -z "$( command -v jq )" ]]
@@ -361,16 +363,3 @@ EOF
 
 echo "$output" > "${current_weather_txt}"
 echo "$output"
-
-
-
-
-
-
-
-
-
-
-
-
-
