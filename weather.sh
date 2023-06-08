@@ -223,19 +223,24 @@ BondGetTime
 coordinates=$(maidenhead_to_lat_long "$maidenhead")
 getSunriseSunset "${coordinates}" "${formatted_offset}"
 
-if ! find "${current_weather_json}" -mmin -15 >/dev/null 2>&1
+
+if [[ -s "${current_weather_json}" ]]
 then
-    echo "Updating weather info as it is older than 15 minutes."
-    url=$( curl -s "https://api.weather.gov/points/${coordinates}" | jq -r '.properties.forecastGridData')
-    if [[ -n "${url}" ]]
+    if [[ $( find "${current_weather_json}" -mmin -15 | wc -l ) -eq 0 ]]
     then
-        weather=$( curl -s "${url}" | jq '.properties' )
-        if [[ -n "${weather}" ]]
+        echo "Updating weather info as it is older than 15 minutes."
+        url=$( curl -s "https://api.weather.gov/points/${coordinates}" | jq -r '.properties.forecastGridData')
+        if [[ -n "${url}" ]]
         then
-            echo "${weather}" > "${current_weather_json}"
+            weather=$( curl -s "${url}" | jq '.properties' )
+            if [[ -n "${weather}" ]]
+            then
+                echo "${weather}" > "${current_weather_json}"
+            fi
         fi
     fi
 fi
+
 if [[ -z "${weather}" ]]
 then
     weather=$(cat "$current_weather_json")
