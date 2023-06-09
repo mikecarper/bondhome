@@ -6,8 +6,24 @@ current_weather_txt="${HOME}/.bond/weather.txt"
 updateRan=0
 bond_token=''
 ip_address=''
+forcerefresh=0
+current_hour=$( date +'%Y-%m-%dT%H:' )
 
-if [[ -s "${current_weather_txt}" ]]
+
+while getopts "F" opt; do
+  case $opt in
+    F)
+      forcerefresh=1
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG"
+      exit 1
+      ;;
+  esac
+done
+
+
+if [[ -s "${current_weather_txt}" && "${forcerefresh}" -eq 0 ]]
 then
     if [[ $( find "${current_weather_txt}" -mmin -20 | wc -l ) -eq 1 ]]
     then
@@ -92,7 +108,6 @@ BondGetTime() {
     BondTokenGet
 
     local bondTime
-    local timezone
 
     bondTime=$( curl -s --max-time 5 -H "BOND-Token: ${bond_token}" "http://${ip_address}/v2/sys/time" )
     maidenhead=$( echo "${bondTime}" | jq -r '.grid //empty' )
@@ -224,12 +239,13 @@ coordinates=$(maidenhead_to_lat_long "$maidenhead")
 getSunriseSunset "${coordinates}" "${formatted_offset}"
 
 
-if [[ -s "${current_weather_json}" ]]
+if [[ -s "${current_weather_json}" || "${forcerefresh}" -eq 1 ]]
 then
-    if [[ $( find "${current_weather_json}" -mmin -15 | wc -l ) -eq 0 ]]
+    if [[ $( find "${current_weather_json}" -mmin -15 | wc -l ) -eq 0 || "${forcerefresh}" -eq 1 ]]
     then
         echo "Updating weather info as it is older than 15 minutes."
         url=$( curl -s "https://api.weather.gov/points/${coordinates}" | jq -r '.properties.forecastGridData')
+        echo "Weather URL: ${url}"
         if [[ -n "${url}" ]]
         then
             weather=$( curl -s "${url}" | jq '.properties' )
@@ -246,38 +262,81 @@ then
     weather=$(cat "$current_weather_json")
 fi
 
+updateTime=$( echo "${weather}" | jq -r '.updateTime' | cut -d '+' -f 1 )
+validTime=$( echo "${weather}" | jq -r '.validTimes' | cut -d '+' -f 1 )
 
-temperatureNow=$( echo "${weather}" | jq -r '.temperature.values[0].value' )
+searchTime=$( date +'%Y-%m-%dT%H:' )
+searchDate=$( date +'%Y-%m-%dT' )
+
+
+
+temperatureNow=$( echo "${weather}" | jq --arg searchTime "${searchTime}" -r '.temperature.values[] | select(.validTime | startswith($searchTime)) | .value' )
 temperatureNowUnit=$( echo "${weather}" | jq -r '.temperature.uom' | tail -c 2 | tr -d '[:space:]' )
 
-temperatureMax=$( echo "${weather}" | jq -r '.maxTemperature.values[0].value' )
+temperatureMax=$( echo "${weather}" | jq --arg searchDate "${searchDate}" -r '.maxTemperature.values[] | select(.validTime | startswith($searchDate)) | .value' )
 temperatureMaxUnit=$( echo "${weather}" | jq -r '.maxTemperature.uom' | tail -c 2 | tr -d '[:space:]' )
 
-temperatureMin=$( echo "${weather}" | jq -r '.minTemperature.values[0].value' )
+temperatureMin=$( echo "${weather}" | jq --arg searchDate "${searchDate}" -r '.minTemperature.values[] | select(.validTime | startswith($searchDate)) | .value' )
 temperatureMinUnit=$( echo "${weather}" | jq -r '.minTemperature.uom' | tail -c 2 | tr -d '[:space:]' )
 
-heatIndexNow=$( echo "${weather}" | jq -r '.heatIndex.values[0].value // empty' | tr -d '[:space:]' )
+heatIndexNow=$( echo "${weather}" | jq --arg searchTime "${searchTime}" -r '.heatIndex.values[] | select(.validTime | startswith($searchTime)) | .value // empty' | tr -d '[:space:]' )
 heatIndexNowUnit=$( echo "${weather}" | jq -r '.heatIndex.uom' | tail -c 2 | tr -d '[:space:]' )
 
-apparentTemperatureNow=$( echo "${weather}" | jq -r '.apparentTemperature.values[0].value' )
+apparentTemperatureNow=$( echo "${weather}" | jq --arg searchTime "${searchTime}" -r '.apparentTemperature.values[] | select(.validTime | startswith($searchTime)) | .value' )
 apparentTemperatureNowUnit=$( echo "${weather}" | jq -r '.apparentTemperature.uom' | tail -c 2 | tr -d '[:space:]' )
 
-relativeHumidity=$( echo "${weather}" | jq -r '.relativeHumidity.values[0].value' )
+relativeHumidity=$( echo "${weather}" | jq --arg searchTime "${searchTime}" -r '.relativeHumidity.values[] | select(.validTime | startswith($searchTime)) | .value' )
 
-skyCoverNow=$( echo "${weather}" | jq -r '.skyCover.values[0].value' )
-probabilityOfPrecipitationNow=$( echo "${weather}" | jq -r '.probabilityOfPrecipitation.values[0].value // empty' | tr -d '[:space:]' )
+skyCoverNow=$( echo "${weather}" | jq --arg searchTime "${searchTime}" -r '.skyCover.values[] | select(.validTime | startswith($searchTime)) | .value' )
+probabilityOfPrecipitationNow=$( echo "${weather}" | jq --arg searchTime "${searchTime}" -r '.probabilityOfPrecipitation.values[] | select(.validTime | startswith($searchTime)) | .value // empty' | tr -d '[:space:]' )
 
-quantitativePrecipitationNow=$( echo "${weather}" | jq -r '.quantitativePrecipitation.values[0].value // empty' | tr -d '[:space:]' )
+quantitativePrecipitationNow=$( echo "${weather}" | jq --arg searchTime "${searchTime}" -r '.quantitativePrecipitation.values[] | select(.validTime | startswith($searchTime)) | .value // empty' | tr -d '[:space:]' )
 quantitativePrecipitationNowUnit=$( echo "${weather}" | jq -r '.quantitativePrecipitation.uom // empty' | tr -d '[:space:]' | tail -c 2 )
 
-windSpeedNow=$( echo "${weather}" | jq -r '.windSpeed.values[0].value' )
+windSpeedNow=$( echo "${weather}" | jq --arg searchDate "${searchDate}" -r '.windSpeed.values[] | select(.validTime | startswith($searchDate)) | "\(.value) \(.validTime)"' | cut -d "+" -f 1 )
 windSpeedNowUnit=$( echo "${weather}" | jq -r '.windSpeed.uom' | cut -d ":" -f2 | sed 's/_h-1/\/h/g' )
 
-windGustNow=$( echo "${weather}" | jq -r '.windGust.values[0].value' )
+windGustNow=$( echo "${weather}" | jq --arg searchDate "${searchDate}" -r '.windGust.values[] | select(.validTime | startswith($searchDate)) | "\(.value) \(.validTime)"' | cut -d "+" -f 1 )
 windGustNowUnit=$( echo "${weather}" | jq -r '.windGust.uom' | cut -d ":" -f2 | sed 's/_h-1/\/h/g' )
 
-transportWindSpeedNow=$( echo "${weather}" | jq -r '.transportWindSpeed.values[0].value' )
+transportWindSpeedNow=$( echo "${weather}" | jq --arg searchDate "${searchDate}" -r '.transportWindSpeed.values[] | select(.validTime | startswith($searchDate)) | "\(.value) \(.validTime)"' | cut -d "+" -f 1 )
 transportWindSpeedNowUnit=$( echo "${weather}" | jq -r '.transportWindSpeed.uom' | cut -d ":" -f2 | sed 's/_h-1/\/h/g' )
+
+
+GetClosestTime() {
+    timestamps=${1}
+    target_timestamp=$(date +%s)
+    for timestamp in $timestamps
+    do
+        diff=$((timestamp - target_timestamp))
+        if [[ -z $closest_timestamp || $diff -lt $closest_diff ]]
+        then
+            closest_timestamp=$timestamp
+            closest_diff=$diff
+        fi
+    done
+    echo "${closest_timestamp}"
+}
+
+# Convert dates to unix time
+windSpeedNowValues=$( echo "${windSpeedNow}" | cut -d " " -f 1 )
+windSpeedNowTimes=$( echo "${windSpeedNow}" | cut -d " " -f 2 | awk -F"[-T:]" '{print mktime(sprintf("%04d %02d %02d %02d %02d %02d", $1, $2, $3, $4, $5, $6))}' )
+windSpeedNowTimestamp=$( GetClosestTime "${windSpeedNowTimes}" )
+windSpeedCombinedData=$( paste -d ' ' <(echo "$windSpeedNowValues") <(echo "$windSpeedNowTimes") )
+windSpeedNow=$( echo "${windSpeedCombinedData}" | grep "${windSpeedNowTimestamp}" | cut -d " " -f 1 )
+
+windGustNowValues=$( echo "${windGustNow}" | cut -d " " -f 1 )
+windGustNowTimes=$( echo "${windGustNow}" | cut -d " " -f 2 | awk -F"[-T:]" '{print mktime(sprintf("%04d %02d %02d %02d %02d %02d", $1, $2, $3, $4, $5, $6))}' )
+windGustNowTimestamp=$( GetClosestTime "${windGustNowTimes}" )
+windGustCombinedData=$( paste -d ' ' <(echo "$windGustNowValues") <(echo "$windGustNowTimes") )
+windGustNow=$( echo "${windGustCombinedData}" | grep "${windGustNowTimestamp}" | cut -d " " -f 1 )
+
+transportWindSpeedNowValues=$( echo "${transportWindSpeedNow}" | cut -d " " -f 1 )
+transportWindSpeedNowTimes=$( echo "${transportWindSpeedNow}" | cut -d " " -f 2 | awk -F"[-T:]" '{print mktime(sprintf("%04d %02d %02d %02d %02d %02d", $1, $2, $3, $4, $5, $6))}' )
+transportWindSpeedNowTimestamp=$( GetClosestTime "${transportWindSpeedNowTimes}" )
+transportWindSpeedCombinedData=$( paste -d ' ' <(echo "$transportWindSpeedNowValues") <(echo "$windGustNowTimes") )
+transportWindSpeedNow=$( echo "${transportWindSpeedCombinedData}" | grep "${transportWindSpeedNowTimestamp}" | cut -d " " -f 1 )
+
 
 # Convert to F from C if needed.
 if [[ "${temperatureNowUnit}" == "C" || "${temperatureNowUnit}" == "c" ]]
@@ -340,14 +399,25 @@ then
     heatIndexNowUnit="F"
 fi
 
-current_time=$(date +"%H:%M")
+current_time=$( date +"%H:%M" )
+unix_time_now=$( date +%s )
+unix_validTime=$( echo "${validTime}" | awk -F"[-T:]" '{print mktime(sprintf("%04d %02d %02d %02d %02d %02d", $1, $2, $3, $4, $5, $6))}' )
+unix_updateTime=$( echo "${updateTime}" | awk -F"[-T:]" '{print mktime(sprintf("%04d %02d %02d %02d %02d %02d", $1, $2, $3, $4, $5, $6))}' )
+unix_sunrise=$( echo "${sunrise} ${tzOffest}" | awk '{print $2 $3}' )
+unix_sunrise=$( date -d "${unix_sunrise}" +%s )
+unix_sunset=$( echo "${sunset} ${tzOffest}" | awk '{print $2 $3}' )
+unix_sunset=$( date -d "${unix_sunset}" +%s )
+unix_midday=$( echo "${midday} ${tzOffest}" | awk '{print $2 $3}' )
+unix_midday=$( date -d "${unix_midday}" +%s )
 
 output=$(cat <<EOF
-Generated time: ${current_time}
 Coordinates: ${coordinates}
-${sunrise}
-${sunset}
-${midday}
+Valid Weather Time: ${validTime} ${unix_validTime}
+Weather Data Good Until: ${updateTime} ${unix_updateTime}
+Generated time: ${current_time} ${tzOffest} ${unix_time_now}
+${sunrise} ${tzOffest} ${unix_sunrise}
+${sunset} ${tzOffest} ${unix_sunset}
+${midday} ${tzOffest} ${unix_midday}
 
 Heat Index: ${heatIndexNow} F
 Apparent Temperature: ${apparentTemperatureNow} ${apparentTemperatureNowUnit}
