@@ -479,7 +479,7 @@ BondGetGroups() {
     echo "Getting groups  under bond ${selected_bondid} at ${ip_address}"
 
     bondGroups=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" -s "http://${ip_address}/v2/groups"  )
-    if [[ -z "${bondGroups}" || $( echo "${bondGroups}" | jq -e 2>&1 | grep 'parse error' | wc -l) -eq 1 ]]
+    if [[ -z "${bondGroups}" || $( echo "${bondGroups}" | jq -e 2>&1 | grep -c 'parse error' ) -eq 1 ]]
     then
         echo "No groups found here http://${ip_address}/v2/groups"
         return
@@ -612,7 +612,7 @@ BondGetDevices() {
 
 
     bondDevices=$( curl -s --max-time 10 -H "BOND-Token: ${bond_token}" -s "http://${ip_address}/v2/devices"  )
-    if [[ -z "${bondDevices}" || $( echo "${bondDevices}" | jq -e 2>&1 | grep 'parse error' | wc -l) -eq 1 ]]
+    if [[ -z "${bondDevices}" || $( echo "${bondDevices}" | jq -e 2>&1 | grep -c 'parse error' ) -eq 1 ]]
     then
         echo "No devices found here http://${ip_address}/v2/devices"
         return
@@ -771,7 +771,7 @@ BondRunAll() {
                     http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" | tail -1 )
                 fi
             fi
-            echo ">${http_code}< PUT http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action} ${bond_token}"
+            echo ">${http_code}< PUT http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}"
         done <<< "$(  echo "${bondDevicesFinalAlt}" | jq -r '.key' )"
     fi
 
