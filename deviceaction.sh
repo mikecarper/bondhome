@@ -8,8 +8,8 @@ bond_devices_file="${HOME}/.bond/devices"
 bond_groups_file="${HOME}/.bond/groups"
 
 # option --output/-o requires 1 argument
-LONGOPTS=help
-OPTIONS=hhrRcFf:i:t:I:d:a:m:g:
+LONGOPTS=help,type:
+OPTIONS=hhrRcFDGf:i:t:I:d:a:m:g:
 
 # -regarding ! and PIPESTATUS see above
 # -temporarily store output to be able to check for errors
@@ -33,6 +33,9 @@ rescan=0
 rescanNetwork=0
 cronrun=0
 tryagain=1
+type=''
+alldevices=1
+allgroups=1
 
 menu=0
 selectedBondDevice=''
@@ -43,6 +46,7 @@ touch "${bond_db_file}"
 
 helpoutput() {
 cat<<EOF
+ -h -H  (--help) display this help file
  -f     json file used to read/write global info. Default is ${bond_db_file}
  -l     json file prefix for device list. Default is ${bond_devices_file}
  -L     json file prefix for group list. Default is ${bond_groups_file}
@@ -50,14 +54,21 @@ cat<<EOF
  -R     rescan network for bond home base station devices.
  -c     rescan all base stations for devices & groups and exit. Useful for cron jobs.
  -m     1 for devices 2 for groups
- -i     bond id to use
+ -i     bond id to use. If "ALL" is used then it'll run on all device ips found.
  -t     bond token to use
  -I     bond IP to use
  -d     bond device to use
  -g     bond group to use
  -a     bond action to take
+ -D     run action only on all bond devices
+ -G     run action only on all bond groups
  -F     fail if call did not work
- -h -H  (--help) display this help file
+ --type CF : Ceiling Fan
+        FP : Fireplace
+        MS : Motorized Window Coverings (Shades, Screens, Drapes) and Awnings
+        GX : Generic device
+        LT : Light
+        BD : Bidet
 EOF
 }
 
@@ -145,6 +156,21 @@ while true; do
         -a)
             echo "Option -a Set action passed with argument: $2"
             action="${2}"
+            shift 2
+        ;;
+        -D)
+            echo "Option -D run action only on all devices"
+            allgroups=0
+            shift
+        ;;
+        -G)
+            echo "Option -G run action only on all groups"
+            alldevices=0
+            shift
+        ;;
+        --type)
+            echo "Option --type Set action passed with argument: $2"
+            type="${2}"
             shift 2
         ;;
         -F)
@@ -570,20 +596,6 @@ BondDoGroupAction() {
     fi
 }
 
-BondDoDeviceAction() {
-    BondGetIPFromFile
-
-    echo
-    echo "PUT http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}"
-    http_code=$( curl -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}" | tail -1 )
-    echo "${http_code}"
-    if [[ "${http_code}" != "200" && "${tryagain}" -eq 1 ]]
-    then
-        echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -d ${selectedBondGroup} -a ${action} -F -R"
-        ${scriptName} "-i" "${selected_bondid}" "-t" "${bond_token}" "-d" "${selectedBondGroup}" "-a" "${action}" "-F" "-R"
-        exit
-    fi
-}
 
 BondGetDevices() {
     if [[ -r "${bond_devices_file}-${selected_bondid}.json" ]]
@@ -720,10 +732,77 @@ BondDoDeviceAction() {
     fi
 }
 
+BondRunAll() {
+    BondTokenGetFromJSON
+    BondGetIPFromFile
+    BondGetDevices
+    BondGetGroups
+
+
+    if [[ -n "${type}" ]]
+    then
+        bondDevicesFinalAlt=$( echo "${bondDevicesFinal}" | jq --arg var "${type}" 'to_entries[] | select(.value.type? == $var)' )
+        bondGroupsFinalAlt=$( echo "${bondGroupsFinal}" | jq --arg var "${type}" 'to_entries[] | select(.value.types?[] == $var)' )
+    else
+        bondDevicesFinalAlt=$( echo "${bondDevicesFinal}" | jq --arg var "${type}" 'to_entries[]' )
+        bondGroupsFinalAlt=$( echo "${bondGroupsFinal}" | jq --arg var "${type}" 'to_entries[]' )
+    fi
+    #echo "${bondDevicesFinalAlt}"
+
+    if [[ -n "${action}" ]]
+    then
+        bondDevicesFinalAlt=$( echo "${bondDevicesFinalAlt}" | jq --arg var "${action}" 'select(.value.actions?[] == $var)' )
+        bondGroupsFinalAlt=$( echo "${bondGroupsFinalAlt}" | jq --arg var "${action}" 'select(.value.actions?[] == $var)' )
+    fi
+
+
+    if [[ "${alldevices}" -eq 1 ]]
+    then
+        while read -r selectedBondDevice
+        do
+            http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" | tail -1 )
+            if [[ "${http_code}" != "200" ]]
+            then
+                sleep 1
+                http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" | tail -1 )
+                if [[ "${http_code}" != "200" ]]
+                then
+                    sleep 5
+                    http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" | tail -1 )
+                fi
+            fi
+            echo ">${http_code}< PUT http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action} ${bond_token}"
+        done <<< "$(  echo "${bondDevicesFinalAlt}" | jq -r '.key' )"
+    fi
+
+    if [[ "${allgroups}" -eq 1 ]]
+    then
+        while read -r selectedBondGroup
+        do
+            http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}" | tail -1 )
+            if [[ "${http_code}" != "200" ]]
+            then
+                sleep 1
+                http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}" | tail -1 )
+                if [[ "${http_code}" != "200" ]]
+                then
+                    sleep 5
+                    http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}" | tail -1 )
+                fi
+            fi
+            echo ">${http_code}< PUT http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}"
+        done <<< "$(  echo "${bondGroupsFinalAlt}" | jq -r '.key' )"
+    fi
+
+    exit
+}
+
 
 ###
 ### Start of program
 ###
+
+
 
 
 if [[ "${cronrun}" -eq 1 ]]
@@ -746,6 +825,23 @@ then
         echo
         BondGetGroups
         echo
+    done <<< "$( jq -r '.bonds | to_entries[] | select(.value.ip? and .value.token?) | "\(.key) \(.value.ip) \(.value.token)"' < "$bond_db_file" )"
+
+    exit
+fi
+
+if [[ "${selected_bondid}" == 'ALL' ]]
+then
+
+    while read -r line
+    do
+        selected_bondid=$( echo "${line}" | awk '{print $1}' )
+        ip_address=$( echo "${line}" | awk '{print $2}' )
+        bond_token=$( echo "${line}" | awk '{print $3}' )
+        echo
+
+        BondRunAll
+
     done <<< "$( jq -r '.bonds | to_entries[] | select(.value.ip? and .value.token?) | "\(.key) \(.value.ip) \(.value.token)"' < "$bond_db_file" )"
 
     exit
