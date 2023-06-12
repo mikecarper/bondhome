@@ -33,7 +33,7 @@ sudo apt install nano
 nano ~/bondhome/schedulerunner.sh
 ```
 
-#### Example cronjob.
+#### Step 5.
 
 Edit the crontab to add in new jobs.
 ```shell
