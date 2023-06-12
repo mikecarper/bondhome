@@ -21,7 +21,7 @@ bash ~/bondhome/weather.sh
 ```
 
 #### Step 3. 
-Get a collection of commands you'd want to run at various times and conditions.
+Get a collection of commands you'd want to run at various times and conditions. The line after "command to do this again" from the output.
 ```shell
 bash ~/bondhome/deviceaction.sh
 ```
