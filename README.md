@@ -34,7 +34,15 @@ nano ~/bondhome/schedulerunner.sh
 ```
 
 #### Example cronjob.
+
+Edit the crontab to add in new jobs.
+```shell
+crontab -e
+```
+
 This example assumes the username is pi.  
+
+What this will do:  
 Do not send email.  
 Run `weather.sh` every 30 min to get updated weather data.  
 Run `deviceaction.sh` every every 2 hours to scan the local network for new bond stuff.  
