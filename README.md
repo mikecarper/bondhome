@@ -54,3 +54,33 @@ MAILTO=""
 5 */2 * * * bash /home/pi/bondhome/deviceaction.sh -c
 2-59/5 * * * * bash /home/pi/bondhome/schedulerunner.sh
 ```
+
+## example weather.sh output
+```
+Coordinates: 45,-100 (lat,Long)
+Valid Weather Time: YYYY-MM-DDTHH:00:00 UNIXTIME
+Weather Data Good Until:YYYY-MM-DDTHH:MM:SS UNIXTIME
+Generated time: 11:19 -TZ UNIXTIME
+sunrise: 05:09 -TZ UNIXTIME
+sunset: 21:07 -TZ UNIXTIME
+midday: 13:08 -TZ UNIXTIME
+
+Heat Index: 50 F
+Apparent Temperature: 49 F
+Temperature: 51 F
+Max Temperature: 72 F
+Min Temperature: 49 F
+Relative Humidity: 85 %
+
+Sky Cover: 46 %
+Solar Watt Hours Today: 2847 (1kw system)
+Solar Watt Hours Morning: 2065 (1kw system)
+Solar Watt Hours Afternoon: 784 (1kw system)
+Probability of Precipitation: 0 %
+Quantitative Precipitation: 0.00 in
+
+Wind: 4.6 mph
+Wind Gust: 6.9 mph
+Transport Wind: 5.8 mph
+Max Wind: 6.9 mph
+```
