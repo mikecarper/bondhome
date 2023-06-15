@@ -316,8 +316,31 @@ then
     solar=$( cat "${current_solar_json}" )
 fi
 
+# Get total watt hours in the day
 searchDate=$( date +'%Y-%m-%d' )
 wattHoursDay=$( echo "${solar}" | jq -r --arg searchDate "${searchDate}" '.result.watt_hours_day[$searchDate]' )
+
+# get Morning and afternoon watt hours
+unix_midday=$( echo "${midday} ${tzOffest}" | awk '{print $2 $3}' )
+unix_midday=$( date -d "${unix_midday}" +%s )
+watt_data=$( echo "${solar}" | jq -r '.result.watts | to_entries[] | "\(.key) \(.value)"' | grep "${searchDate}" | grep -v ' 0$' )
+wattHoursBeforeNoon=0
+wattHoursAfterNoon=0
+while read -r line
+do
+    time=$(echo "$line" | awk '{print $1, $2}')
+    value=$(echo "$line" | awk '{print $3}')
+
+    unix_time=$(date -d "$time" +%s)
+
+    if [[ $unix_time -lt $unix_midday ]]
+    then
+        wattHoursBeforeNoon=$((wattHoursBeforeNoon + value))
+    else
+        wattHoursAfterNoon=$((wattHoursAfterNoon + value))
+    fi
+done <<< $( echo "${watt_data}"  )
+
 
 updateTime=$( echo "${weather}" | jq -r '.updateTime' | cut -d '+' -f 1 )
 validTime=$( echo "${weather}" | jq -r '.validTimes' | cut -d '+' -f 1 )
@@ -478,6 +501,8 @@ Relative Humidity: ${relativeHumidity} %
 
 Sky Cover: ${skyCoverNow} %
 Solar Watt Hours Today: ${wattHoursDay} (1kw system)
+Solar Watt Hours Morning: ${wattHoursBeforeNoon} (1kw system)
+Solar Watt Hours Afternoon: ${wattHoursAfterNoon} (1kw system)
 Probability of Precipitation: ${probabilityOfPrecipitationNow} %
 Quantitative Precipitation: ${quantitativePrecipitationNow} ${quantitativePrecipitationNowUnit}
 
