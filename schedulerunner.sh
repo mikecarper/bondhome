@@ -56,6 +56,28 @@ secondsToHM() {
 
 
 
+# Everyone Not Home?
+phonefound=0
+filesize=0
+while read -r phonefile
+do
+    filesize=$( stat -c "%s" "${phonefile}" )
+    if [[ "${filesize}" -gt 32 ]]
+    then
+        phonefound=1
+        #phoneTimeChecked=$( tac "${phonefile}" | grep -m 1 -v "^\s*$" )
+        #phoneTimeCheckedDate=$( date -d "@${phoneTimeChecked}" )
+        #echo "${filesize} ${phoneTimeChecked} ${phoneTimeCheckedDate}"
+    fi
+done <<< "$( find "${HOME}/.bond/" -type f -name "phone-*.txt" )"
+
+if [[ "${phonefound}" -eq 0 && "${filesize}" -gt 0 ]]
+then
+    echo "No phones on the local network. Closing East Interior Blinds"
+    bash "${HOME}/bond-sh/deviceaction.sh" -i ZPEE65205 -m 2 -g f84acdf0292a075a -a Close
+fi
+
+
 
 # 1 hour before sunset.
 timeBeforeSunset=3600
