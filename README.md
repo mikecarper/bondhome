@@ -53,6 +53,7 @@ MAILTO=""
 */30 * * * * bash /home/pi/bondhome/weather.sh
 5 */2 * * * bash /home/pi/bondhome/deviceaction.sh -c
 2-59/5 * * * * bash /home/pi/bondhome/schedulerunner.sh
+*/10 * * * * bash /home/mcarper/bond-sh/iphone.sh
 ```
 
 ## example weather.sh output
@@ -72,11 +73,14 @@ Max Temperature: 72 F
 Min Temperature: 49 F
 Relative Humidity: 85 %
 
-Sky Cover: 46 %
-Solar Watt Hours Today: 2847 (1kw system)
-Solar Watt Hours Morning: 2065 (1kw system)
-Solar Watt Hours Afternoon: 784 (1kw system)
-Probability of Precipitation: 0 %
+Sky Cover Now: 98 %
+Average Sky Cover Morning: 96 %
+Average Sky Cover Afternoon: 94 %
+Solar Watt Now: 99 (1kw system)
+Solar Watt Hours Today: 918 (1kw system)
+Solar Watt Hours Morning: 498 (1kw system)
+Solar Watt Hours Afternoon: 416 (1kw system)
+Probability of Precipitation: 64 %
 Quantitative Precipitation: 0.00 in
 
 Wind: 4.6 mph
