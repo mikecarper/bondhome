@@ -1,5 +1,5 @@
 ## What this does
-Provides a way to control [bond devices](https://bondhome.io/) via the current weather as well as sun position like sunset. Target environment is a [raspberry pi zero w](https://www.raspberrypi.com/products/raspberry-pi-zero-w/) running Raspberry Pi OS Lite (Linux shell).
+Provides a way to control [bond devices](https://bondhome.io/) via the current weather, as sun position like sunset, estimated solar power generation, and iphone connected to wifi. Target environment is a [raspberry pi zero w](https://www.raspberrypi.com/products/raspberry-pi-zero-w/) running Raspberry Pi OS Lite (Linux shell).
 
 
 ## How to use
