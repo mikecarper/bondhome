@@ -64,8 +64,9 @@ checkphone() {
         return
     fi
     (trap 'kill 0' SIGINT; ( tshark -i "${interfaceName}" -f "ether src host ${phoneMacAddress} or ether dst host ${phoneMacAddress}" -c 2 -a duration:590 2>/dev/null > "${bond_phones_file}-${phoneName}.tmp";
+    echo -e "\n" >> "${bond_phones_file}-${phoneName}.tmp";
     date +%s >> "${bond_phones_file}-${phoneName}.tmp";
-    echo -e "\n\n${timestamp}" >> "${bond_phones_file}-${phoneName}.tmp";
+    echo -e "${timestamp}" >> "${bond_phones_file}-${phoneName}.tmp";
     mv "${bond_phones_file}-${phoneName}.tmp" "${bond_phones_file}-${phoneName}.txt" ) & )
     echo "${phoneMacAddress} running"
 }
