@@ -70,7 +70,7 @@ checkphone() {
     echo "${phoneMacAddress} running"
 }
 
-# MAC addresses of the phones. Add or remove more checkphone calls depending on how many iphones you have in your household
+# MAC addresses of the phones. Add or remove more checkphone function calls depending on how many iphones you have in your household
 #
 # How to get the iphone mac address
 # Open the Settings app
