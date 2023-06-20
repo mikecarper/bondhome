@@ -179,10 +179,18 @@ getSunriseSunset() {
 }
 
 cToF() {
+    if [[ -z "${1}" ]]
+    then
+        return
+    fi
     printf "%.0f" "$( bc <<< "scale=2; 9/5 * $1 + 32" )"
 }
 
 fToC() {
+    if [[ -z "${1}" ]]
+    then
+        return
+    fi
     printf "%.0f" "$( bc <<< "scale=2; ($1 - 32) * 5 / 9" )"
 }
 
@@ -244,9 +252,13 @@ calculate_heat_index_f() {
 GetClosestTime() {
     timestamps=${1}
     target_timestamp=$(date +%s)
+    closest_timestamp=''
+    closest_diff=${target_timestamp}
+
     for timestamp in $timestamps
     do
         diff=$((timestamp - target_timestamp))
+        diff=$( echo "if ($diff < 0) -($diff) else $diff" | bc)
         if [[ -z $closest_timestamp || $diff -lt $closest_diff ]]
         then
             closest_timestamp=$timestamp
@@ -258,13 +270,96 @@ GetClosestTime() {
 
 GetValueOfClosetTime() {
     input=${1}
+
     # Convert dates to unix time
     inputValues=$( echo "${input}" | cut -d " " -f 1 )
     inputTimes=$( echo "${input}" | cut -d " " -f 2 | awk -F"[-T:]" '{print mktime(sprintf("%04d %02d %02d %02d %02d %02d", $1, $2, $3, $4, $5, $6))}' )
+
     inputTimestamp=$( GetClosestTime "${inputTimes}" )
+
     inputCombinedData=$( paste -d ' ' <(echo "${inputValues}") <(echo "${inputTimes}") )
     input=$( echo "${inputCombinedData}" | grep "${inputTimestamp}" | cut -d " " -f 1 )
     echo "${input}"
+}
+
+GetAverageBeforeAndAfterNoon() {
+    data=${1}
+    ValueBeforeNoon=0
+    ValueBeforeNoonCounter=0
+    ValueAfterNoon=0
+    ValueAfterNoonCounter=0
+    while read -r line
+    do
+        time=$(echo "$line" | awk '{print $2}')
+        value=$(echo "$line" | awk '{print $1}')
+
+        unix_time=$(date -d "$time" +%s)
+
+        if [[ $unix_time -lt $unix_midday ]]
+        then
+            #>&2 echo "Morning: ${ValueBeforeNoon} +  ${value}"
+            ValueBeforeNoon=$( echo "${ValueBeforeNoon} +  ${value}" | bc )
+            ((ValueBeforeNoonCounter++))
+        else
+            #>&2 echo "Afternoon: ${ValueAfterNoon} +  ${value}"
+            ValueAfterNoon=$( echo "${ValueAfterNoon} +  ${value}" | bc )
+            ((ValueAfterNoonCounter++))
+        fi
+    done <<< $( echo "${data}" )
+
+    AverageBeforeNoon="N/A"
+    if [[ "${ValueBeforeNoonCounter}" -gt 0 ]]
+    then
+        AverageBeforeNoon=$(echo "${ValueBeforeNoon} / ${ValueBeforeNoonCounter}" | bc)
+    fi
+
+    AverageAfterNoon="N/A"
+    if [[ "${ValueAfterNoonCounter}" -gt 0 ]]
+    then
+        AverageAfterNoon=$(echo "${ValueAfterNoon} / ${ValueAfterNoonCounter}" | bc)
+
+    fi
+
+    echo "Morning: ${AverageBeforeNoon}"
+    echo "Afternoon: ${AverageAfterNoon}"
+}
+
+GetMaxBeforeAndAfterNoon() {
+    data=${1}
+    MaxValueBeforeNoon=-320
+    MaxValueAfterNoon=-320
+    while read -r line
+    do
+        time=$(echo "$line" | awk '{print $2}')
+        value=$(echo "$line" | awk '{print $1}')
+
+        unix_time=$(date -d "$time" +%s)
+
+        if [[ $unix_time -lt $unix_midday ]]
+        then
+            if [[ $(echo "${value} > ${MaxValueBeforeNoon}" | bc -l) ]]
+            then
+                MaxValueBeforeNoon=${value}
+            fi
+        else
+            if [[ $(echo "${value} > ${MaxValueAfterNoon}" | bc -l) ]]
+            then
+                MaxValueAfterNoon=${value}
+            fi
+        fi
+    done <<< $( echo "${data}" )
+
+    if [[ "${MaxValueBeforeNoon}" == "-320" ]]
+    then
+        MaxValueBeforeNoon="N/A"
+    fi
+    if [[ "${MaxValueAfterNoon}" == "-320" ]]
+    then
+        MaxValueAfterNoon="N/A"
+    fi
+
+    echo "Morning: ${MaxValueBeforeNoon}"
+    echo "Afternoon: ${MaxValueAfterNoon}"
 }
 
 BondGetTime
@@ -324,8 +419,13 @@ wattHoursDay=$( echo "${solar}" | jq -r --arg searchDate "${searchDate}" '.resul
 unix_midday=$( echo "${midday} ${tzOffest}" | awk '{print $2 $3}' )
 unix_midday=$( date -d "${unix_midday}" +%s )
 watt_data=$( echo "${solar}" | jq -r '.result.watts | to_entries[] | "\(.key) \(.value)"' | grep "${searchDate}" | grep -v ' 0$' )
+#echo "${watt_data}"
 wattHoursBeforeNoon=0
 wattHoursAfterNoon=0
+target_timestamp=$(date +%s)
+closest_timestamp=''
+closest_timestamp_search=''
+closest_diff=${target_timestamp}
 while read -r line
 do
     time=$(echo "$line" | awk '{print $1, $2}')
@@ -339,8 +439,18 @@ do
     else
         wattHoursAfterNoon=$((wattHoursAfterNoon + value))
     fi
-done <<< $( echo "${watt_data}"  )
 
+    diff=$((unix_time - target_timestamp))
+    diff=$( echo "if ($diff < 0) -($diff) else $diff" | bc)
+    if [[ -z $closest_timestamp || $diff -lt $closest_diff ]]
+    then
+        closest_timestamp=$unix_time
+        closest_timestamp_search=$time
+        closest_diff=$diff
+    fi
+
+done <<< $( echo "${watt_data}"  )
+wattHoursNow=$( echo "${watt_data}" | grep "${closest_timestamp_search}" | awk '{print $3}')
 
 updateTime=$( echo "${weather}" | jq -r '.updateTime' | cut -d '+' -f 1 )
 validTime=$( echo "${weather}" | jq -r '.validTimes' | cut -d '+' -f 1 )
@@ -351,6 +461,13 @@ searchDate=$( date +'%Y-%m-%dT' )
 
 
 temperatureNow=$( echo "${weather}" | jq --arg searchDate "${searchDate}" -r '.temperature.values[] | select(.validTime | startswith($searchDate)) | "\(.value) \(.validTime)"' | cut -d "+" -f 1 )
+temperatureMorningAfternoon=$( GetAverageBeforeAndAfterNoon "${temperatureNow}" )
+temperatureMorning=$( echo "${temperatureMorningAfternoon}" | grep  -oP 'Morning: \K\d+' )
+temperatureAfternoon=$( echo "${temperatureMorningAfternoon}" | grep  -oP 'Afternoon: \K\d+' )
+temperatureMaxMorningAfternoon=$( GetMaxBeforeAndAfterNoon "${temperatureNow}" )
+temperatureMaxMorning=$( echo "${temperatureMaxMorningAfternoon}" | grep  -oP 'Morning: \K\d+' )
+temperatureMaxAfternoon=$( echo "${temperatureMaxMorningAfternoon}" | grep  -oP 'Afternoon: \K\d+' )
+
 temperatureNow=$( GetValueOfClosetTime "${temperatureNow}" )
 temperatureNowUnit=$( echo "${weather}" | jq -r '.temperature.uom' | tail -c 2 | tr -d '[:space:]' )
 #echo "temperatureNow ${temperatureNow} ${temperatureNowUnit}"
@@ -377,8 +494,11 @@ relativeHumidity=$( GetValueOfClosetTime "${relativeHumidity}" )
 #echo "relativeHumidity ${relativeHumidity}"
 
 skyCoverNow=$( echo "${weather}" | jq --arg searchDate "${searchDate}" -r '.skyCover.values[]  | select(.validTime | startswith($searchDate)) | "\(.value) \(.validTime)"' | cut -d "+" -f 1 )
+skyCoverMorningAfternoon=$( GetAverageBeforeAndAfterNoon "${skyCoverNow}" )
+skyCoverMorning=$( echo "${skyCoverMorningAfternoon}" | grep  -oP 'Morning: \K\d+' )
+skyCoverAfternoon=$( echo "${skyCoverMorningAfternoon}" | grep  -oP 'Afternoon: \K\d+' )
 skyCoverNow=$( GetValueOfClosetTime "${skyCoverNow}" )
-#echo "skyCoverNow ${skyCoverNow}"
+
 
 probabilityOfPrecipitationNow=$( echo "${weather}" | jq --arg searchTime "${searchTime}" -r '.probabilityOfPrecipitation.values[] | select(.validTime | startswith($searchTime)) | .value // empty' | tr -d '[:space:]' )
 if [[ -z "${probabilityOfPrecipitationNow}" ]]
@@ -392,26 +512,41 @@ quantitativePrecipitationNowUnit=$( echo "${weather}" | jq -r '.quantitativePrec
 #echo "quantitativePrecipitationNow ${quantitativePrecipitationNow} ${quantitativePrecipitationNowUnit}"
 
 windSpeedNow=$( echo "${weather}" | jq --arg searchDate "${searchDate}" -r '.windSpeed.values[] | select(.validTime | startswith($searchDate)) | "\(.value) \(.validTime)"' | cut -d "+" -f 1 )
+#windSpeedMorningAfternoon=$( GetAverageBeforeAndAfterNoon "${windSpeedNow}" )
 windSpeedNow=$( GetValueOfClosetTime "${windSpeedNow}" )
 windSpeedNowUnit=$( echo "${weather}" | jq -r '.windSpeed.uom' | cut -d ":" -f2 | sed 's/_h-1/\/h/g' )
 #echo "windSpeedNow ${windSpeedNow} ${windSpeedNowUnit}"
 
 windGustNow=$( echo "${weather}" | jq --arg searchDate "${searchDate}" -r '.windGust.values[] | select(.validTime | startswith($searchDate)) | "\(.value) \(.validTime)"' | cut -d "+" -f 1 )
+#windGustMorningAfternoon=$( GetAverageBeforeAndAfterNoon "${windGustNow}" )
 windGustNow=$( GetValueOfClosetTime "${windGustNow}" )
 windGustNowUnit=$( echo "${weather}" | jq -r '.windGust.uom' | cut -d ":" -f2 | sed 's/_h-1/\/h/g' )
 #echo "windGustNow ${windGustNow} ${windGustNowUnit}"
 
 transportWindSpeedNow=$( echo "${weather}" | jq --arg searchDate "${searchDate}" -r '.transportWindSpeed.values[] | select(.validTime | startswith($searchDate)) | "\(.value) \(.validTime)"' | cut -d "+" -f 1 )
+#transportWindSpeedMorningAfternoon=$( GetAverageBeforeAndAfterNoon "${transportWindSpeedNow}" )
 transportWindSpeedNow=$( GetValueOfClosetTime "${transportWindSpeedNow}" )
 transportWindSpeedNowUnit=$( echo "${weather}" | jq -r '.transportWindSpeed.uom' | cut -d ":" -f2 | sed 's/_h-1/\/h/g' )
 #echo "transportWindSpeedNow ${transportWindSpeedNow} ${transportWindSpeedNowUnit}"
 
 
 # Convert to F from C if needed.
+temperatureMaxMorningUnit=${temperatureNowUnit}
+temperatureMaxAfternoonUnit=${temperatureNowUnit}
 if [[ "${temperatureNowUnit}" == "C" || "${temperatureNowUnit}" == "c" ]]
 then
     temperatureNow=$( cToF "${temperatureNow}" )
     temperatureNowUnit="F"
+fi
+if [[ "${temperatureMaxMorningUnit}" == "C" || "${temperatureMaxMorningUnit}" == "c" ]]
+then
+    temperatureMaxMorning=$( cToF "${temperatureMaxMorning}" )
+    temperatureMaxMorningUnit="F"
+fi
+if [[ "${temperatureMaxAfternoonUnit}" == "C" || "${temperatureMaxAfternoonUnit}" == "c" ]]
+then
+    temperatureMaxAfternoon=$( cToF "${temperatureMaxAfternoon}" )
+    temperatureMaxAfternoonUnit="F"
 fi
 if [[ "${temperatureMaxUnit}" == "C" || "${temperatureMaxUnit}" == "c" ]]
 then
@@ -496,10 +631,15 @@ Heat Index: ${heatIndexNow} F
 Apparent Temperature: ${apparentTemperatureNow} ${apparentTemperatureNowUnit}
 Temperature: ${temperatureNow} ${temperatureNowUnit}
 Max Temperature: ${temperatureMax} ${temperatureMaxUnit}
+Max Morning Temperature: ${temperatureMaxMorning} ${temperatureMaxMorningUnit}
+Max Afternoon Temperature: ${temperatureMaxAfternoon} ${temperatureNowUnit}
 Min Temperature: ${temperatureMin} ${temperatureMinUnit}
 Relative Humidity: ${relativeHumidity} %
 
-Sky Cover: ${skyCoverNow} %
+Sky Cover Now: ${skyCoverNow} %
+Average Sky Cover Morning: ${skyCoverMorning} %
+Average Sky Cover Afternoon: ${skyCoverAfternoon} %
+Solar Watt Now: ${wattHoursNow} (1kw system)
 Solar Watt Hours Today: ${wattHoursDay} (1kw system)
 Solar Watt Hours Morning: ${wattHoursBeforeNoon} (1kw system)
 Solar Watt Hours Afternoon: ${wattHoursAfterNoon} (1kw system)
