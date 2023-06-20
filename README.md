@@ -26,14 +26,27 @@ Get a collection of commands you'd want to run at various times and conditions. 
 bash ~/bondhome/deviceaction.sh
 ```
 
-#### Step 4. 
+#### Step 5. 
+Edit `iphone.sh` to add in iphone mac address.
+```shell
+sudo apt install nano
+nano ~/bondhome/iphone.sh
+```
+
+#### Step 6. 
+Run `iphone.sh`. The first run will install some needed programs as well (nmap, tshark). It'll scan the network for your phones. Having the Pi plugged in via ethernet is ideal in this case.
+```shell
+bash ~/bondhome/iphone.sh
+```
+
+#### Step 7. 
 Edit `schedulerunner.sh` to match the desired times and conditions from Step 3.
 ```shell
 sudo apt install nano
 nano ~/bondhome/schedulerunner.sh
 ```
 
-#### Step 5.
+#### Step 8.
 
 Edit the crontab to add in new jobs.
 ```shell
@@ -47,6 +60,7 @@ Do not send email.
 Run `weather.sh` every 30 min to get updated weather data.  
 Run `deviceaction.sh` every every 2 hours to scan the local network for new bond stuff.  
 Run `schedulerunner.sh` every 5 minutes to do the programmed logic.  
+Run `iphone.sh` every 10 minutes to check if iPhones are on the LAN.  
 
 ```shell
 MAILTO=""
