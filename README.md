@@ -101,4 +101,22 @@ Wind: 4.6 mph
 Wind Gust: 6.9 mph
 Transport Wind: 5.8 mph
 Max Wind: 6.9 mph
+
+pm10: 8.5
+pm25: 5.6
+carbon_monoxide: 139
+nitrogen_dioxide: 2.9
+sulphur_dioxide: 3.2
+ozone: 122
+aerosol_optical_depth: 0.08
+dust: 0
+uv_index: 6.7
+uv_index_clear_sky: 6.75
+
+Ozone AQI: 0 Good Green
+PM2.5 AQI: 23 Good Green
+PM10 AQI: 8 Good Green
+CO AQI: 2 Good Green
+NO2 AQI: 3 Good Green
+SO2 AQI: 4 Good Green
 ```
