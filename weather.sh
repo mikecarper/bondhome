@@ -10,6 +10,9 @@ ip_address=''
 forcerefresh=0
 current_hour=$( date +'%Y-%m-%dT%H:' )
 
+# Extract the path using dirname
+path=$(dirname "$0")
+
 
 while getopts "F" opt; do
   case $opt in
@@ -305,7 +308,7 @@ GetAverageBeforeAndAfterNoon() {
             ValueAfterNoon=$( echo "${ValueAfterNoon} +  ${value}" | bc )
             ((ValueAfterNoonCounter++))
         fi
-    done <<< $( echo "${data}" )
+    done <<< "${data}"
 
     AverageBeforeNoon="N/A"
     if [[ "${ValueBeforeNoonCounter}" -gt 0 ]]
@@ -347,7 +350,7 @@ GetMaxBeforeAndAfterNoon() {
                 MaxValueAfterNoon=${value}
             fi
         fi
-    done <<< $( echo "${data}" )
+    done <<< "${data}"
 
     if [[ "${MaxValueBeforeNoon}" == "-320" ]]
     then
@@ -393,14 +396,14 @@ fi
 # Get sun data once every 8 hours.
 current_hour=$(date +%H)
 current_minute=$(date +%M)
-if (( $current_hour % 8 == 0 )) && (( $current_minute < 10 ))
+if (( current_hour % 8 == 0 )) && (( current_minute < 10 ))
 then
     lat=$( echo "$coordinates" | cut -d ',' -f 1 )
     long=$( echo "$coordinates" | cut -d ',' -f 2 )
     echo "https://api.forecast.solar/estimate/${lat}/${long}/0/0/1"
     solar=$( curl -s "https://api.forecast.solar/estimate/${lat}/${long}/0/0/1" )
-    result=$(echo "$response" | jq -r '.result')
-    if [[ "$result" != "null" ]]
+    result=$(echo "${solar}" | jq -r '.result')
+    if [[ "${result}" != "null" ]]
     then
         echo "$solar" > "${current_solar_json}"
     fi
@@ -449,7 +452,7 @@ do
         closest_diff=$diff
     fi
 
-done <<< $( echo "${watt_data}"  )
+done <<< "${watt_data}"
 wattHoursNow=$( echo "${watt_data}" | grep "${closest_timestamp_search}" | awk '{print $3}')
 
 updateTime=$( echo "${weather}" | jq -r '.updateTime' | cut -d '+' -f 1 )
@@ -461,9 +464,9 @@ searchDate=$( date +'%Y-%m-%dT' )
 
 
 temperatureNow=$( echo "${weather}" | jq --arg searchDate "${searchDate}" -r '.temperature.values[] | select(.validTime | startswith($searchDate)) | "\(.value) \(.validTime)"' | cut -d "+" -f 1 )
-temperatureMorningAfternoon=$( GetAverageBeforeAndAfterNoon "${temperatureNow}" )
-temperatureMorning=$( echo "${temperatureMorningAfternoon}" | grep  -oP 'Morning: \K\d+' )
-temperatureAfternoon=$( echo "${temperatureMorningAfternoon}" | grep  -oP 'Afternoon: \K\d+' )
+#temperatureMorningAfternoon=$( GetAverageBeforeAndAfterNoon "${temperatureNow}" )
+#temperatureMorning=$( echo "${temperatureMorningAfternoon}" | grep  -oP 'Morning: \K\d+' )
+#temperatureAfternoon=$( echo "${temperatureMorningAfternoon}" | grep  -oP 'Afternoon: \K\d+' )
 temperatureMaxMorningAfternoon=$( GetMaxBeforeAndAfterNoon "${temperatureNow}" )
 temperatureMaxMorning=$( echo "${temperatureMaxMorningAfternoon}" | grep  -oP 'Morning: \K\d+' )
 temperatureMaxAfternoon=$( echo "${temperatureMaxMorningAfternoon}" | grep  -oP 'Afternoon: \K\d+' )
@@ -617,6 +620,7 @@ unix_midday=$( echo "${midday} ${tzOffest}" | awk '{print $2 $3}' )
 unix_midday=$( date -d "${unix_midday}" +%s )
 
 
+air_quality=$( bash "${path}/airquality.sh" )
 
 output=$(cat <<EOF
 Coordinates: ${coordinates}
@@ -650,6 +654,8 @@ Wind: ${windSpeedNow} ${windSpeedNowUnit}
 Wind Gust: ${windGustNow} ${windGustNowUnit}
 Transport Wind: ${transportWindSpeedNow} ${transportWindSpeedNowUnit}
 Max Wind: ${max_wind_speed} ${windSpeedNowUnit}
+
+${air_quality}
 EOF
 )
 
