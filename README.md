@@ -61,13 +61,15 @@ Run `weather.sh` every 30 min to get updated weather data.
 Run `deviceaction.sh` every every 2 hours to scan the local network for new bond stuff.  
 Run `schedulerunner.sh` every 5 minutes to do the programmed logic.  
 Run `iphone.sh` every 10 minutes to check if iPhones are on the LAN.  
+Run `usholidays.sh` At 02:00 the 1st in January to update the year's holidays.  
 
 ```shell
 MAILTO=""
 */30 * * * * bash /home/pi/bondhome/weather.sh
 5 */2 * * * bash /home/pi/bondhome/deviceaction.sh -c
 2-59/5 * * * * bash /home/pi/bondhome/schedulerunner.sh
-*/10 * * * * bash /home/mcarper/bond-sh/iphone.sh
+*/10 * * * * bash /home/pi/bondhome/iphone.sh
+0 2 1 1 * bash /home/pi/bondhome/usholidays.sh
 ```
 
 ## example weather.sh output
