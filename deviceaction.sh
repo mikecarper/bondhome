@@ -3,9 +3,9 @@
 
 # http://docs-local.appbond.com/
 scriptName=${0}
-bond_db_file="${HOME}/.bond/ramdisk/db.json"
-bond_devices_file="${HOME}/.bond/ramdisk/devices"
-bond_groups_file="${HOME}/.bond/ramdisk/groups"
+bond_db_file="${HOME}/.bond/db.json"
+bond_devices_file="${HOME}/.bond/devices"
+bond_groups_file="${HOME}/.bond/groups"
 
 # option --output/-o requires 1 argument
 LONGOPTS=help,dev,type:
@@ -44,7 +44,6 @@ BondBlacklist=''
 nocurl=0
 
 mkdir -p "${HOME}/.bond/"
-mkdir -p "${HOME}/.bond/ramdisk/"
 touch "${bond_db_file}"
 
 helpoutput() {
