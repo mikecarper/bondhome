@@ -3,13 +3,13 @@
 
 # http://docs-local.appbond.com/
 scriptName=${0}
-bond_db_file="${HOME}/.bond/db.json"
-bond_devices_file="${HOME}/.bond/devices"
-bond_groups_file="${HOME}/.bond/groups"
+bond_db_file="${HOME}/.bond/ramdisk/db.json"
+bond_devices_file="${HOME}/.bond/ramdisk/devices"
+bond_groups_file="${HOME}/.bond/ramdisk/groups"
 
 # option --output/-o requires 1 argument
-LONGOPTS=help,type:
-OPTIONS=hhrRcFDGf:i:t:I:d:a:m:g:
+LONGOPTS=help,dev,type:
+OPTIONS=hhrRcFDGf:i:t:I:d:a:m:g:b:
 
 # -regarding ! and PIPESTATUS see above
 # -temporarily store output to be able to check for errors
@@ -40,8 +40,11 @@ allgroups=1
 menu=0
 selectedBondDevice=''
 bondGroupsFinal=''
+BondBlacklist=''
+nocurl=0
 
 mkdir -p "${HOME}/.bond/"
+mkdir -p "${HOME}/.bond/ramdisk/"
 touch "${bond_db_file}"
 
 helpoutput() {
@@ -55,6 +58,7 @@ cat<<EOF
  -c     rescan all base stations for devices & groups and exit. Useful for cron jobs.
  -m     1 for devices 2 for groups
  -i     bond id to use. If "ALL" is used then it'll run on all device ips found.
+ -b     blacklist of devices to not run if ALL is used, comma separated.
  -t     bond token to use
  -I     bond IP to use
  -d     bond device to use
@@ -69,6 +73,7 @@ cat<<EOF
         GX : Generic device
         LT : Light
         BD : Bidet
+ --dev  Debug mode; don't run the curl command.
 EOF
 }
 
@@ -133,6 +138,13 @@ while true; do
             selected_bondid="${2}"
             shift 2
         ;;
+        -b)
+            echo "Option -b Set Blacklist: $2"
+            BondBlacklist="${2}"
+            BondBlacklist=",${BondBlacklist},"
+            BondBlacklist="${BondBlacklist//,,/,}"
+            shift 2
+        ;;
         -t)
             echo "Option -t Set Token passed with argument: $2"
             bond_token="${2}"
@@ -172,6 +184,11 @@ while true; do
             echo "Option --type Set action passed with argument: $2"
             type="${2}"
             shift 2
+        ;;
+        --dev)
+            echo "Option --dev. Development mode, do not run curl"
+            nocurl=1
+            shift
         ;;
         -F)
             echo "Option -F do not try curl again"
@@ -217,6 +234,14 @@ function display_menu() {
 }
 
 Menu() {
+    if [[ -n "${selectedBondDevice}" ]]
+    then
+        menu=1
+    fi
+    if [[ -n "${selectedBondGroup}" ]]
+    then
+        menu=2
+    fi
     if [[ "${menu}" -ne 0 ]]
     then
         return
@@ -586,13 +611,18 @@ BondDoGroupAction() {
 
     echo
     echo "PUT http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}"
-    http_code=$( curl -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}" | tail -1 )
-    echo "${http_code}"
-    if [[ "${http_code}" != "200" && "${tryagain}" -eq 1 ]]
+    if [[ "${nocurl}" -eq 0 ]]
     then
-        echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -d ${selectedBondGroup} -a ${action} -F -R"
-        ${scriptName} "-i" "${selected_bondid}" "-t" "${bond_token}" "-d" "${selectedBondGroup}" "-a" "${action}" "-F" "-R"
-        exit
+        http_code=$( curl -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}" | tail -1 )
+        echo "${http_code}"
+        if [[ "${http_code}" != "200" && "${tryagain}" -eq 1 ]]
+        then
+            echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -d ${selectedBondGroup} -a ${action} -F -R"
+            ${scriptName} "-i" "${selected_bondid}" "-t" "${bond_token}" "-d" "${selectedBondGroup}" "-a" "${action}" "-F" "-R"
+            exit
+        fi
+    else
+        printf "This was not ran: curl -s -w \"%s\" -X PUT -H \"BOND-Token: %s\" -H \"Content-Type: application/json\" -d \"{}\" \"http://%s/v2/groups/%s/actions/%s\"\n" "%{http_code}\n" "${bond_token}" "${ip_address}" "${selectedBondGroup}" "${action}"
     fi
 }
 
@@ -722,13 +752,18 @@ BondDoDeviceAction() {
 
     echo
     echo "PUT http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}"
-    http_code=$( curl -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" | tail -1 )
-    echo "${http_code}"
-    if [[ "${http_code}" != "200" && "${tryagain}" -eq 1 ]]
+    if [[ "${nocurl}" -eq 0 ]]
     then
-        echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -d ${selectedBondDevice} -a ${action} -F -R"
-        ${scriptName} "-i" "${selected_bondid}" "-t" "${bond_token}" "-d" "${selectedBondDevice}" "-a" "${action}" "-F" "-R"
-        exit
+        http_code=$( curl -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" | tail -1 )
+        echo "${http_code}"
+        if [[ "${http_code}" != "200" && "${tryagain}" -eq 1 ]]
+        then
+            echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -d ${selectedBondDevice} -a ${action} -F -R"
+            ${scriptName} "-i" "${selected_bondid}" "-t" "${bond_token}" "-d" "${selectedBondDevice}" "-a" "${action}" "-F" "-R"
+            exit
+        fi
+    else
+        printf "This was not ran: curl -s -w \"%s\" -X PUT -H \"BOND-Token: %s\" -H \"Content-Type: application/json\" -d \"{}\" \"http://%s/v2/groups/%s/actions/%s\"\n" "%{http_code}\n" "${bond_token}" "${ip_address}" "${selectedBondDevice}" "${action}"
     fi
 }
 
@@ -760,18 +795,28 @@ BondRunAll() {
     then
         while read -r selectedBondDevice
         do
-            http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" | tail -1 )
-            if [[ "${http_code}" != "200" ]]
+            if [[ "${BondBlacklist}" == *",${selectedBondDevice},"* ]]
             then
-                sleep 1
-                http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" | tail -1 )
-                if [[ "${http_code}" != "200" ]]
+                echo "Skipping ${selectedBondDevice}"
+            else
+                if [[ "${nocurl}" -eq 0 ]]
                 then
-                    sleep 5
                     http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" | tail -1 )
+                    if [[ "${http_code}" != "200" ]]
+                    then
+                        sleep 1
+                        http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" | tail -1 )
+                        if [[ "${http_code}" != "200" ]]
+                        then
+                            sleep 5
+                            http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}" | tail -1 )
+                        fi
+                    fi
+                    echo ">${http_code}< PUT http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}"
+                else
+                    echo ">Not Ran< PUT http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}"
                 fi
             fi
-            echo ">${http_code}< PUT http://${ip_address}/v2/devices/${selectedBondDevice}/actions/${action}"
         done <<< "$(  echo "${bondDevicesFinalAlt}" | jq -r '.key' )"
     fi
 
@@ -779,18 +824,28 @@ BondRunAll() {
     then
         while read -r selectedBondGroup
         do
-            http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}" | tail -1 )
-            if [[ "${http_code}" != "200" ]]
+            if [[ "${BondBlacklist}" == *",${selectedBondGroup},"* ]]
             then
-                sleep 1
+                echo "Skipping ${selectedBondGroup}"
+            else
+                if [[ "${nocurl}" -eq 0 ]]
+                then
                 http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}" | tail -1 )
                 if [[ "${http_code}" != "200" ]]
                 then
-                    sleep 5
+                    sleep 1
                     http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}" | tail -1 )
+                    if [[ "${http_code}" != "200" ]]
+                    then
+                        sleep 5
+                        http_code=$( curl --max-time 10 -s -w "%{http_code}\n" -X PUT -H "BOND-Token: ${bond_token}" -H "Content-Type: application/json" -d "{}" "http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}" | tail -1 )
+                    fi
+                    echo ">${http_code}< PUT http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}"
+                fi
+                else
+                    echo ">Not Ran< PUT http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}"
                 fi
             fi
-            echo ">${http_code}< PUT http://${ip_address}/v2/groups/${selectedBondGroup}/actions/${action}"
         done <<< "$(  echo "${bondGroupsFinalAlt}" | jq -r '.key' )"
     fi
 
@@ -906,7 +961,7 @@ then
 
     echo
     echo "command to do this again"
-    echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -I ${ip_address} -m 1 -d ${selectedBondDevice} -a ${action}"
+    echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -I ${ip_address} -d ${selectedBondDevice} -a ${action}"
 fi
 if [[ "${menu}" -eq 2 ]]
 then
@@ -935,5 +990,5 @@ then
 
     echo
     echo "command to do this again"
-    echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -I ${ip_address} -m 2 -g ${selectedBondGroup} -a ${action}"
+    echo "${scriptName} -i ${selected_bondid} -t ${bond_token} -I ${ip_address} -g ${selectedBondGroup} -a ${action}"
 fi
